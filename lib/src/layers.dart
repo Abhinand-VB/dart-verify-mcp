@@ -84,7 +84,8 @@ class LayerReport {
   ];
 
   Map<String, Object?> toJson() => {
-    'passed': passed,
+    // With no rules nothing was checked, which is not the same as passing.
+    'passed': rules.isEmpty ? null : passed,
     'violation_count': violations.length,
     'rules': [
       for (final r in rules) {'name': r, 'files_checked': filesChecked[r] ?? 0},

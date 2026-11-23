@@ -131,6 +131,7 @@ import 'stub.dart'
     test('with no rules, says so rather than claiming success', () {
       final report = checkLayers(root, const []);
       expect(report.summary(), contains('nothing checked'));
+      expect(report.toJson()['passed'], isNull);
     });
   });
 }
