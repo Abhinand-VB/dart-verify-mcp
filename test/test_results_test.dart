@@ -88,6 +88,8 @@ String reporterOutput(
 }
 
 void main() {
+  diffTests();
+
   group('parseJsonReporter', () {
     test('collects visible tests and ignores hidden pseudo-tests', () {
       final run = parseJsonReporter(
@@ -210,6 +212,64 @@ void main() {
         classify(run({}, loadError: 'nope'), null).single.verdict,
         Verdict.error,
       );
+    });
+  });
+}
+
+void diffTests() {
+  group('parseChangedLines', () {
+    test('reads new-side ranges, including pure deletions', () {
+      const diff = '''
+diff --git a/t.dart b/t.dart
+@@ -3 +3 @@ void main() {
+@@ -10,0 +11,4 @@
+@@ -20,2 +24,0 @@
+''';
+      expect(parseChangedLines(diff), [(3, 3), (11, 14), (24, 24)]);
+    });
+  });
+
+  group('markInDiff', () {
+    TestVerdict v(String name, int line) => TestVerdict(
+      name: name,
+      line: line,
+      verdict: Verdict.passesOnBase,
+      detail: '',
+    );
+
+    test('a test owns lines up to the next test', () {
+      final (marked, outside) = markInDiff(
+        [v('a', 5), v('b', 10), v('c', 20)],
+        [(12, 13), (2, 3)],
+        fileLines: List.filled(30, 'code();'),
+      );
+      expect(marked.map((t) => (t.name, t.inDiff)), [
+        ('a', false),
+        ('b', true),
+        ('c', false),
+      ]);
+      expect(outside, 2);
+    });
+
+    test('the last test owns the rest of the file', () {
+      final (marked, _) = markInDiff(
+        [v('a', 5), v('b', 10)],
+        [(29, 29)],
+        fileLines: List.filled(30, 'code();'),
+      );
+      expect(marked.map((t) => t.inDiff), [false, true]);
+    });
+
+    test('blank and bracket-only changed lines do not count', () {
+      final lines = List.filled(12, 'code();');
+      lines[6] = '';
+      lines[7] = '  });';
+      final (marked, _) = markInDiff(
+        [v('a', 5), v('b', 9)],
+        [(7, 8)],
+        fileLines: lines,
+      );
+      expect(marked.map((t) => t.inDiff), [false, false]);
     });
   });
 }

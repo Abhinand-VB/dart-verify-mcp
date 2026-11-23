@@ -18,6 +18,8 @@ class TestOutcome {
   final String result;
   final bool skipped;
   final List<String> errors;
+
+  /// 1-based line of the `test(...)` call in the suite file, if known.
   final int? line;
 
   bool get passed => result == 'success' && !skipped;
@@ -122,7 +124,13 @@ SuiteRun parseJsonReporter(String stdout, {String stderr = ''}) {
             result: result,
             skipped: event['skipped'] == true,
             errors: errs,
-            line: start?['line'] is int ? start!['line'] as int : null,
+            // root_line is the location in the suite file when the test was
+            // declared through a helper in another file.
+            line: start?['root_line'] is int
+                ? start!['root_line'] as int
+                : start?['line'] is int
+                ? start!['line'] as int
+                : null,
           ),
         );
     }
@@ -185,9 +193,30 @@ class TestVerdict {
     required this.detail,
     this.baseResult,
     this.currentResult,
+    this.line,
+    this.inDiff = true,
   });
 
   final String? name;
+
+  /// Line of the test in the (new) test file, if known.
+  final int? line;
+
+  /// Whether this test's lines changed relative to the base ref. Tests that
+  /// did not change are reported but left out of the verdict: an old test
+  /// passing on old code says nothing about the new change.
+  final bool inDiff;
+
+  TestVerdict withInDiff(bool value) => TestVerdict(
+    name: name,
+    verdict: verdict,
+    detail: detail,
+    baseResult: baseResult,
+    currentResult: currentResult,
+    line: line,
+    inDiff: value,
+  );
+
   final Verdict verdict;
   final String detail;
   final String? baseResult;
@@ -195,7 +224,9 @@ class TestVerdict {
 
   Map<String, Object?> toJson() => {
     'name': name,
+    if (line != null) 'line': line,
     'verdict': verdict.id,
+    'in_diff': inDiff,
     if (baseResult != null) 'base_result': baseResult,
     if (currentResult != null) 'current_result': currentResult,
     'detail': detail,
@@ -244,6 +275,7 @@ List<TestVerdict> classify(SuiteRun base, SuiteRun? current) {
     final currentResult = now == null ? null : _result(now);
     TestVerdict v(Verdict verdict, String detail) => TestVerdict(
       name: name,
+      line: now?.line ?? then?.line,
       verdict: verdict,
       detail: detail,
       baseResult: then == null ? null : _result(then),
@@ -324,4 +356,68 @@ List<TestVerdict> classify(SuiteRun base, SuiteRun? current) {
     ];
   }
   return [for (final t in base.tests) judge(null, t.name)];
+}
+
+/// Parses `git diff -U0` output into the changed line ranges of the new
+/// file, as inclusive `(start, end)` pairs. A pure deletion is recorded as
+/// the single line after which it happened.
+List<(int, int)> parseChangedLines(String diff) {
+  final hunk = RegExp(
+    r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@',
+    multiLine: true,
+  );
+  return [
+    for (final m in hunk.allMatches(diff))
+      () {
+        final start = int.parse(m.group(1)!);
+        final count = int.parse(m.group(2) ?? '1');
+        return count == 0 ? (start, start) : (start, start + count - 1);
+      }(),
+  ];
+}
+
+/// Marks each verdict as in or out of the diff.
+///
+/// A test owns the lines from its `test(` call up to the line before the
+/// next test's call (or the end of the file). This is a heuristic: a change
+/// to a shared helper or setUp above the first test is not attributed to
+/// any test. Changed lines that are blank or hold only closing brackets are
+/// ignored, because git often places the separator between an old test and
+/// an appended one inside the old test's range.
+///
+/// [fileLines] is the content of the new test file. Returns the updated
+/// verdicts and the number of meaningful changed lines above the first test.
+(List<TestVerdict>, int) markInDiff(
+  List<TestVerdict> verdicts,
+  List<(int, int)> changed, {
+  required List<String> fileLines,
+}) {
+  final starts = {
+    for (final v in verdicts)
+      if (v.line != null) v.line!,
+  }.toList()..sort();
+  if (starts.isEmpty) return (verdicts, 0);
+  final trivial = RegExp(r'^[\s{}()\[\];,]*$');
+  final meaningful = <int>{
+    for (final (a, b) in changed)
+      for (var l = a; l <= b; l++)
+        if (l - 1 < fileLines.length && !trivial.hasMatch(fileLines[l - 1])) l,
+  };
+  int endOf(int start) {
+    final i = starts.indexOf(start);
+    return i + 1 < starts.length ? starts[i + 1] - 1 : fileLines.length;
+  }
+
+  final outside = meaningful.where((l) => l < starts.first).length;
+  return (
+    [
+      for (final v in verdicts)
+        v.line == null
+            ? v
+            : v.withInDiff(
+                meaningful.any((l) => l >= v.line! && l <= endOf(v.line!)),
+              ),
+    ],
+    outside,
+  );
 }

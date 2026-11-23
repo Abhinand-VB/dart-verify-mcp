@@ -81,6 +81,12 @@ base class VerifyServer extends MCPServer with ToolsSupport {
               'worktree) so a test that fails everywhere is not mistaken for '
               'one that detects the change. Default true.',
         ),
+        'only_changed_tests': Schema.bool(
+          description:
+              'In a test file that already existed at base_ref, judge only '
+              'the tests whose lines changed (unchanged tests are listed but '
+              'not judged). Default true.',
+        ),
         'timeout_seconds': Schema.int(
           description: 'Per test file, per tree. Default 600.',
           minimum: 10,
@@ -178,6 +184,7 @@ base class VerifyServer extends MCPServer with ToolsSupport {
           baseRef: (args['base_ref'] as String?) ?? 'HEAD',
           testFiles: (args['test_files'] as List?)?.cast<String>(),
           checkCurrent: (args['check_current'] as bool?) ?? true,
+          onlyChangedTests: (args['only_changed_tests'] as bool?) ?? true,
           config: cfg,
           perFileTimeout: timeout is int ? Duration(seconds: timeout) : null,
         );

@@ -65,20 +65,32 @@ class ProveTestsReport {
   final List<String> carriedFiles;
   final String? message;
 
-  Iterable<TestVerdict> get _all => files.expand((f) => f.verdicts);
+  /// The tests the verdict is about: those whose lines changed.
+  Iterable<TestVerdict> get _judged =>
+      files.expand((f) => f.verdicts).where((t) => t.inDiff);
+
+  int get unchangedCount =>
+      files.expand((f) => f.verdicts).where((t) => !t.inDiff).length;
 
   Map<String, int> get counts {
     final c = {for (final v in Verdict.values) v.id: 0};
-    for (final t in _all) {
+    for (final t in _judged) {
       c[t.verdict.id] = c[t.verdict.id]! + 1;
     }
     return c;
   }
 
-  /// True when there was at least one test and every one either fails on
-  /// base or does not compile there, while passing on the current code.
+  /// True when there was at least one changed test and every one either
+  /// fails on base or does not compile there, while passing on the current
+  /// code.
   bool get allDetectChange =>
-      _all.isNotEmpty && _all.every((t) => t.verdict.detectsChange);
+      _judged.isNotEmpty && _judged.every((t) => t.verdict.detectsChange);
+
+  List<(String, TestVerdict)> get _attention => [
+    for (final f in files)
+      for (final t in f.verdicts)
+        if (t.inDiff && !t.verdict.detectsChange) (f.file, t),
+  ];
 
   Map<String, Object?> toJson() => {
     'all_tests_detect_change': allDetectChange,
@@ -86,11 +98,10 @@ class ProveTestsReport {
     'base_sha': baseSha,
     'checked_current_code': checkCurrent,
     'counts': counts,
+    'unchanged_tests_not_judged': unchangedCount,
     'needs_attention': [
-      for (final f in files)
-        for (final t in f.verdicts)
-          if (!t.verdict.detectsChange)
-            {'file': f.file, 'test': t.name, 'verdict': t.verdict.id},
+      for (final (file, t) in _attention)
+        {'file': file, 'test': t.name, 'line': t.line, 'verdict': t.verdict.id},
     ],
     'files': [for (final f in files) f.toJson()],
     'carried_test_side_files': carriedFiles,
@@ -102,11 +113,14 @@ class ProveTestsReport {
       return 'prove_tests_can_fail: ${message ?? 'no test files to check.'}';
     }
     final c = counts;
-    final total = _all.length;
     final b = StringBuffer(
       'prove_tests_can_fail vs $baseRef (${baseSha.substring(0, 7)}): '
-      '$total test(s) in ${files.length} file(s). ',
+      '${_judged.length} changed test(s) in ${files.length} file(s)',
     );
+    if (unchangedCount > 0) {
+      b.write(' ($unchangedCount unchanged test(s) not judged)');
+    }
+    b.write('. ');
     b.write(
       [
         for (final v in Verdict.values)
@@ -114,16 +128,17 @@ class ProveTestsReport {
       ].join(', '),
     );
     b.write('.');
-    final attention = [
-      for (final f in files)
-        for (final t in f.verdicts)
-          if (!t.verdict.detectsChange) (f.file, t),
-    ];
-    if (attention.isEmpty) {
-      b.write('\nEvery test fails without the change.');
+    final attention = _attention;
+    if (_judged.isEmpty) {
+      b.write('\nNo changed tests were found to judge.');
+    } else if (attention.isEmpty) {
+      b.write('\nEvery changed test fails without the change.');
     } else {
       for (final (file, t) in attention.take(15)) {
-        b.write('\n  ${t.verdict.id}: $file: ${t.name ?? '(whole file)'}');
+        b.write(
+          '\n  ${t.verdict.id}: $file'
+          '${t.line == null ? '' : ':${t.line}'}: ${t.name ?? '(whole file)'}',
+        );
       }
       if (attention.length > 15) {
         b.write('\n  ... ${attention.length - 15} more (see JSON).');
@@ -153,6 +168,7 @@ Future<ProveTestsReport> proveTestsCanFail(
   String baseRef = 'HEAD',
   List<String>? testFiles,
   bool checkCurrent = true,
+  bool onlyChangedTests = true,
   VerifyConfig? config,
   Duration? perFileTimeout,
   Duration pubGetTimeout = const Duration(minutes: 10),
@@ -368,6 +384,18 @@ Future<ProveTestsReport> proveTestsCanFail(
       final isFlutter = _isFlutterPackage(p.join(repo, pkg));
       var verdicts = classify(baseRuns[t]!, currentRuns?[t]);
       String? note;
+      if (onlyChangedTests) {
+        final scoped = await _scopeToDiff(
+          git,
+          repo,
+          sha,
+          t,
+          verdicts,
+          explicit: testFiles != null && testFiles.isNotEmpty,
+        );
+        verdicts = scoped.$1;
+        note = scoped.$2;
+      }
       if (verdicts.isEmpty) {
         note = 'The runner reported no tests in this file.';
         verdicts = [
@@ -508,6 +536,40 @@ Future<SuiteRun> _runTestFile(
     return SuiteRun(tests: const [], setupError: outcome.startError);
   }
   return parseJsonReporter(outcome.stdout, stderr: outcome.stderr);
+}
+
+/// Marks which tests in [file] changed relative to [sha]. Returns the
+/// updated verdicts and an optional note.
+Future<(List<TestVerdict>, String?)> _scopeToDiff(
+  Future<ProcessOutcome> Function(List<String>, {String? cwd}) git,
+  String repo,
+  String sha,
+  String file,
+  List<TestVerdict> verdicts, {
+  required bool explicit,
+}) async {
+  final atBase = await git(['cat-file', '-e', '$sha:$file'], cwd: repo);
+  if (!atBase.succeeded) return (verdicts, null); // New file: all changed.
+  final diff = await git(['diff', '-U0', sha, '--', file], cwd: repo);
+  final changed = parseChangedLines(diff.stdout);
+  if (changed.isEmpty) {
+    return (
+      verdicts,
+      explicit
+          ? 'Unchanged since the base ref; every test judged because the file '
+                'was named explicitly.'
+          : null,
+    );
+  }
+  final lines = File(p.join(repo, file)).readAsLinesSync();
+  final (marked, outside) = markInDiff(verdicts, changed, fileLines: lines);
+  return (
+    marked,
+    outside > 0
+        ? '$outside changed line(s) above the first test (imports, helpers, '
+              'setUp) are not attributed to any test.'
+        : null,
+  );
 }
 
 Future<void> _deleteWithRetry(Directory dir) async {

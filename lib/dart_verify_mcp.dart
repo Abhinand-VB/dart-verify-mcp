@@ -34,6 +34,8 @@ export 'src/test_results.dart'
         TestVerdict,
         Verdict,
         classify,
+        markInDiff,
+        parseChangedLines,
         parseJsonReporter;
 export 'src/unused_deps.dart'
     show

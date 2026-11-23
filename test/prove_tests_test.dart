@@ -86,6 +86,20 @@ void main() {
   test('doubles', () => expect(twice(4), 8));
 }
 ''',
+    // An existing file gains one test. Only that test is judged: the old
+    // one passing on old code says nothing about this change.
+    'test/existing_test.dart': '''
+import 'package:fixture/calc.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('zero stays zero', () => expect(clampToZero(0), 0));
+
+  test('clamps minus one', () {
+    expect(clampToZero(-1), 0);
+  });
+}
+''',
     'test/broken_test.dart': '''
 import 'package:fixture/calc.dart';
 import 'package:test/test.dart';
@@ -100,7 +114,8 @@ void main() {
 
 Map<String, Verdict> verdicts(ProveTestsReport r) => {
   for (final f in r.files)
-    for (final t in f.verdicts) '${f.file}: ${t.name}': t.verdict,
+    for (final t in f.verdicts)
+      if (t.inDiff) '${f.file}: ${t.name}': t.verdict,
 };
 
 void main() {
@@ -116,8 +131,10 @@ void main() {
       'test/broken_test.dart: wrong expectation': Verdict.failsOnCurrent,
       'test/clamp_test.dart: clamps negatives': Verdict.failsOnBase,
       'test/clamp_test.dart: keeps positives': Verdict.passesOnBase,
+      'test/existing_test.dart: clamps minus one': Verdict.failsOnBase,
       'test/twice_test.dart: doubles': Verdict.error,
     });
+    expect(report.unchangedCount, 1);
     expect(report.carriedFiles, ['test/support/expectations.dart']);
     expect(report.allDetectChange, isFalse);
     expect(report.counts['PASSES_ON_BASE'], 1);
