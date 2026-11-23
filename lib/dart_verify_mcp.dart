@@ -24,6 +24,16 @@ export 'src/layers.dart'
     show LayerReport, LayerViolation, checkLayers, uriMatches;
 export 'src/process_runner.dart'
     show CommandRunner, ProcessOutcome, runCommand, trimOutput;
+export 'src/prove_tests.dart'
+    show FileResult, ProveTestsException, ProveTestsReport, proveTestsCanFail;
+export 'src/test_results.dart'
+    show
+        SuiteRun,
+        TestOutcome,
+        TestVerdict,
+        Verdict,
+        classify,
+        parseJsonReporter;
 export 'src/unused_deps.dart'
     show
         DepFinding,
