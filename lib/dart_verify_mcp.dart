@@ -18,8 +18,12 @@ export 'src/dart_source.dart'
         packageNameOf,
         parseDirectives,
         stripComments;
+export 'src/gate.dart'
+    show GateReport, StepResult, StepStatus, defaultSteps, runGate;
 export 'src/layers.dart'
     show LayerReport, LayerViolation, checkLayers, uriMatches;
+export 'src/process_runner.dart'
+    show CommandRunner, ProcessOutcome, runCommand, trimOutput;
 export 'src/unused_deps.dart'
     show
         DepFinding,
