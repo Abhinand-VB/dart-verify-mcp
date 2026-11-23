@@ -2,6 +2,15 @@
 /// projects, exposed as an MCP server and usable as a library.
 library;
 
+export 'src/config.dart'
+    show
+        CodePattern,
+        ConfigException,
+        GateStep,
+        LayerRule,
+        VerifyConfig,
+        configFileName,
+        splitCommand;
 export 'src/dart_source.dart'
     show
         DirectiveKind,
@@ -9,3 +18,5 @@ export 'src/dart_source.dart'
         packageNameOf,
         parseDirectives,
         stripComments;
+export 'src/layers.dart'
+    show LayerReport, LayerViolation, checkLayers, uriMatches;
