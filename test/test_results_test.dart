@@ -158,6 +158,16 @@ void main() {
         ('t2', Verdict.error),
       ]);
       expect(v.first.detail, contains('undefined name'));
+      final real = classify(
+        run(
+          {},
+          loadError:
+              'Failed to load "test/a_test.dart":\n'
+              "test/a_test.dart:3:38: Error: Method not found: 'nope'.",
+        ),
+        run({'t': 'success'}),
+      );
+      expect(real.single.detail, contains("Method not found: 'nope'"));
     });
 
     test('fails on the current code: FAILS_ON_CURRENT, whatever base did', () {
@@ -237,39 +247,63 @@ diff --git a/t.dart b/t.dart
       detail: '',
     );
 
-    test('a test owns lines up to the next test', () {
-      final (marked, outside) = markInDiff(
-        [v('a', 5), v('b', 10), v('c', 20)],
-        [(12, 13), (2, 3)],
-        fileLines: List.filled(30, 'code();'),
-      );
-      expect(marked.map((t) => (t.name, t.inDiff)), [
-        ('a', false),
-        ('b', true),
-        ('c', false),
-      ]);
+    // Line numbers below are 1-based positions in this source.
+    const source = '''
+import 'package:test/test.dart';
+
+void main() {
+  test('one-liner', () => expect(1, 1));
+
+  test('multi-line', () {
+    expect(2, 2);
+  });
+
+  group('g', () {
+    int helper() => 3;
+
+    test(
+      'formatted call',
+      () => expect(helper(), 3),
+    );
+  });
+}
+''';
+    final lines = source.split('\n');
+    final tests = [
+      v('one-liner', 4),
+      v('multi-line', 6),
+      v('g formatted call', 13),
+    ];
+
+    List<bool> judge(List<(int, int)> changed) => [
+      for (final t in markInDiff(tests, changed, fileLines: lines).$1) t.inDiff,
+    ];
+
+    test('a test owns its body, found by indentation', () {
+      expect(judge([(4, 4)]), [true, false, false]);
+      expect(judge([(7, 7)]), [false, true, false]);
+      expect(judge([(15, 15)]), [false, false, true]);
+    });
+
+    test('helpers and group headers between tests belong to no test', () {
+      // The Van case: a new group with a helper, inserted after an old test,
+      // must not mark the old test as changed.
+      final (marked, outside) = markInDiff(tests, [(10, 11)], fileLines: lines);
+      expect(marked.map((t) => t.inDiff), [false, false, false]);
       expect(outside, 2);
     });
 
-    test('the last test owns the rest of the file', () {
-      final (marked, _) = markInDiff(
-        [v('a', 5), v('b', 10)],
-        [(29, 29)],
-        fileLines: List.filled(30, 'code();'),
-      );
-      expect(marked.map((t) => t.inDiff), [false, true]);
+    test('blank and bracket-only changed lines do not count', () {
+      expect(judge([(5, 5), (8, 8)]), [false, false, false]);
     });
 
-    test('blank and bracket-only changed lines do not count', () {
-      final lines = List.filled(12, 'code();');
-      lines[6] = '';
-      lines[7] = '  });';
+    test('tests without a known line are left in scope', () {
       final (marked, _) = markInDiff(
-        [v('a', 5), v('b', 9)],
-        [(7, 8)],
+        [TestVerdict(name: 'x', verdict: Verdict.error, detail: '')],
+        [(1, 1)],
         fileLines: lines,
       );
-      expect(marked.map((t) => t.inDiff), [false, false]);
+      expect(marked.single.inDiff, isTrue);
     });
   });
 }

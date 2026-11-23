@@ -236,7 +236,16 @@ class TestVerdict {
 String _result(TestOutcome t) => t.skipped ? 'skipped' : t.result;
 
 String _firstLine(String s) {
-  final l = s.trim().split('\n').first;
+  // `Failed to load "test/x_test.dart":` is only a header; the compiler's
+  // message is on the next line.
+  final lines = [
+    for (final l in s.trim().split('\n'))
+      if (l.trim().isNotEmpty) l.trim(),
+  ];
+  if (lines.isEmpty) return '';
+  final l = lines.length > 1 && lines.first.startsWith('Failed to load')
+      ? lines[1]
+      : lines.first;
   return l.length > 300 ? '${l.substring(0, 300)}...' : l;
 }
 
@@ -378,15 +387,19 @@ List<(int, int)> parseChangedLines(String diff) {
 
 /// Marks each verdict as in or out of the diff.
 ///
-/// A test owns the lines from its `test(` call up to the line before the
-/// next test's call (or the end of the file). This is a heuristic: a change
-/// to a shared helper or setUp above the first test is not attributed to
-/// any test. Changed lines that are blank or hold only closing brackets are
-/// ignored, because git often places the separator between an old test and
-/// an appended one inside the old test's range.
+/// A test's extent is found from indentation, which is reliable for code
+/// formatted by `dart format`: it starts at the line of its `test(` call and
+/// continues through every following line that is blank or indented deeper,
+/// up to and including a closing line (`});`, `);`) at the call's own
+/// indentation. A single-line test owns just its line. The next test's
+/// start line is a hard stop in any case.
 ///
-/// [fileLines] is the content of the new test file. Returns the updated
-/// verdicts and the number of meaningful changed lines above the first test.
+/// Changed lines outside every test (imports, helpers, group headers, setUp)
+/// are not attributed to any test; the count of such meaningful lines is
+/// returned so the report can say so. Blank and bracket-only changed lines
+/// are ignored.
+///
+/// [fileLines] is the content of the new test file.
 (List<TestVerdict>, int) markInDiff(
   List<TestVerdict> verdicts,
   List<(int, int)> changed, {
@@ -401,21 +414,51 @@ List<(int, int)> parseChangedLines(String diff) {
   final meaningful = <int>{
     for (final (a, b) in changed)
       for (var l = a; l <= b; l++)
-        if (l - 1 < fileLines.length && !trivial.hasMatch(fileLines[l - 1])) l,
+        if (l >= 1 &&
+            l - 1 < fileLines.length &&
+            !trivial.hasMatch(fileLines[l - 1]))
+          l,
   };
-  int endOf(int start) {
-    final i = starts.indexOf(start);
-    return i + 1 < starts.length ? starts[i + 1] - 1 : fileLines.length;
+
+  int indentOf(String line) => line.length - line.trimLeft().length;
+
+  final extents = <int, (int, int)>{};
+  for (final (i, start) in starts.indexed) {
+    final hardStop = i + 1 < starts.length
+        ? starts[i + 1] - 1
+        : fileLines.length;
+    if (start - 1 >= fileLines.length) {
+      extents[start] = (start, start);
+      continue;
+    }
+    final indent = indentOf(fileLines[start - 1]);
+    var end = start;
+    for (var l = start + 1; l <= hardStop; l++) {
+      final text = fileLines[l - 1];
+      if (text.trim().isEmpty) continue;
+      final ind = indentOf(text);
+      if (ind > indent) {
+        end = l;
+        continue;
+      }
+      final t = text.trimLeft();
+      if (ind == indent && (t.startsWith('}') || t.startsWith(')'))) end = l;
+      break;
+    }
+    extents[start] = (start, end);
   }
 
-  final outside = meaningful.where((l) => l < starts.first).length;
+  bool inAny(int l) => extents.values.any((e) => l >= e.$1 && l <= e.$2);
+  final outside = meaningful.where((l) => !inAny(l)).length;
   return (
     [
       for (final v in verdicts)
         v.line == null
             ? v
             : v.withInDiff(
-                meaningful.any((l) => l >= v.line! && l <= endOf(v.line!)),
+                meaningful.any(
+                  (l) => l >= extents[v.line!]!.$1 && l <= extents[v.line!]!.$2,
+                ),
               ),
     ],
     outside,

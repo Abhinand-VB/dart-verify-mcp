@@ -80,16 +80,19 @@ class ProveTestsReport {
     return c;
   }
 
-  /// True when there was at least one changed test and every one either
-  /// fails on base or does not compile there, while passing on the current
-  /// code.
-  bool get allDetectChange =>
-      _judged.isNotEmpty && _judged.every((t) => t.verdict.detectsChange);
+  /// True when there was at least one changed test, every changed test
+  /// either fails on base or does not compile there, and no test in the
+  /// checked files fails on the current code.
+  bool get allDetectChange => _judged.isNotEmpty && _attention.isEmpty;
 
   List<(String, TestVerdict)> get _attention => [
     for (final f in files)
       for (final t in f.verdicts)
-        if (t.inDiff && !t.verdict.detectsChange) (f.file, t),
+        // A test that fails on the current code needs attention whether or
+        // not it changed: the change broke it.
+        if ((t.inDiff && !t.verdict.detectsChange) ||
+            t.verdict == Verdict.failsOnCurrent)
+          (f.file, t),
   ];
 
   Map<String, Object?> toJson() => {
@@ -566,8 +569,8 @@ Future<(List<TestVerdict>, String?)> _scopeToDiff(
   return (
     marked,
     outside > 0
-        ? '$outside changed line(s) above the first test (imports, helpers, '
-              'setUp) are not attributed to any test.'
+        ? '$outside changed line(s) outside any test body (imports, '
+              'helpers, group headers, setUp) are not attributed to a test.'
         : null,
   );
 }
