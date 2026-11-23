@@ -20,3 +20,10 @@ export 'src/dart_source.dart'
         stripComments;
 export 'src/layers.dart'
     show LayerReport, LayerViolation, checkLayers, uriMatches;
+export 'src/unused_deps.dart'
+    show
+        DepFinding,
+        DepStatus,
+        PackageDepReport,
+        UnusedDepsReport,
+        findUnusedDependencies;
