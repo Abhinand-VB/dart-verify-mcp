@@ -214,6 +214,81 @@ void main() {
     expect(report.files.single.runner, 'dart');
   });
 
+  test('reaches the same verdicts through a path spelled differently from '
+      "git's", () async {
+    // On macOS the temp dir is /var/... while git reports /private/var/...;
+    // on Windows CI it is C:/Users/RUNNER~1/... while git reports the long
+    // name. Reaching the repo through a link reproduces that mismatch on
+    // any platform.
+    final repo = buildFixture();
+    final link = Link(p.join(tempDir('dvm_link_'), 'via_link'))
+      ..createSync(repo);
+    final report = await proveTestsCanFail(
+      link.path,
+      testFiles: ['test/clamp_test.dart'],
+      checkCurrent: false,
+    );
+    expect(verdicts(report), {
+      'test/clamp_test.dart: clamps negatives': Verdict.failsOnBase,
+      'test/clamp_test.dart: keeps positives': Verdict.passesOnBase,
+    });
+    final auto = await proveTestsCanFail(link.path, checkCurrent: false);
+    expect(auto.files.map((f) => f.file), contains('test/twice_test.dart'));
+  });
+
+  test(
+    'an internal git or path failure is an error, never an empty result',
+    () async {
+      final repo = buildFixture();
+      final elsewhere = tempDir('dvm_elsewhere_');
+
+      // A runner that lies about one git command and passes the rest through.
+      CommandRunner lying(String argument, ProcessOutcome Function() fake) =>
+          (command, {required workingDirectory, required timeout}) async =>
+              command.contains(argument)
+              ? fake()
+              : runCommand(
+                  command,
+                  workingDirectory: workingDirectory,
+                  timeout: timeout,
+                );
+      ProcessOutcome outcome({required int code, String stdout = ''}) =>
+          ProcessOutcome(
+            command: const ['git'],
+            workingDirectory: repo,
+            exitCode: code,
+            stdout: stdout,
+            stderr: code == 0 ? '' : 'fatal: simulated',
+            timedOut: false,
+            duration: Duration.zero,
+          );
+
+      await expectLater(
+        proveTestsCanFail(
+          repo,
+          runner: lying(
+            '--show-toplevel',
+            () => outcome(code: 0, stdout: '$elsewhere\n'),
+          ),
+        ),
+        throwsA(
+          isA<ProveTestsException>().having(
+            (e) => e.message,
+            'message',
+            contains('Internal path mismatch'),
+          ),
+        ),
+      );
+      await expectLater(
+        proveTestsCanFail(
+          repo,
+          runner: lying('ls-files', () => outcome(code: 128)),
+        ),
+        throwsA(isA<ProveTestsException>()),
+      );
+    },
+  );
+
   test('with nothing changed, says so', () async {
     final repo = buildFixture();
     git(repo, ['add', '.']);

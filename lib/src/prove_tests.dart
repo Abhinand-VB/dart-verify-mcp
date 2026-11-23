@@ -177,7 +177,17 @@ Future<ProveTestsReport> proveTestsCanFail(
   Duration pubGetTimeout = const Duration(minutes: 10),
   CommandRunner runner = runCommand,
 }) async {
-  final root = p.normalize(p.absolute(projectRoot));
+  final given = p.normalize(p.absolute(projectRoot));
+  if (!Directory(given).existsSync()) {
+    throw ProveTestsException('Project root does not exist: $given');
+  }
+  // Every path below is compared with paths git prints, so both sides are
+  // canonicalised first. The same directory can be spelled several ways:
+  // macOS temp dirs are /var/... but git reports /private/var/..., and
+  // Windows can hand out 8.3 names (C:/Users/RUNNER~1) where git reports the
+  // long name. Comparing unresolved spellings made every changed test look
+  // as if it were outside the project, and the tool returned nothing.
+  final root = _canonical(given);
   final cfg = config ?? VerifyConfig.load(root);
   final timeout = perFileTimeout ?? Duration(seconds: cfg.proveTimeoutSeconds);
 
@@ -193,7 +203,14 @@ Future<ProveTestsReport> proveTestsCanFail(
       '$root is not inside a git repository: ${top.combinedOutput}',
     );
   }
-  final repo = p.normalize(top.stdout.trim());
+  final repo = _canonical(p.normalize(top.stdout.trim()));
+  if (!p.equals(repo, root) && !p.isWithin(repo, root)) {
+    throw ProveTestsException(
+      'Internal path mismatch: git reports the repository at $repo, which '
+      'does not contain the project root $root. Refusing to guess which '
+      'changes belong to the project.',
+    );
+  }
 
   final rev = await git([
     'rev-parse',
@@ -224,6 +241,11 @@ Future<ProveTestsReport> proveTestsCanFail(
     '--exclude-standard',
     '-z',
   ], cwd: repo);
+  if (!untracked.succeeded) {
+    throw ProveTestsException(
+      'git ls-files failed: ${untracked.combinedOutput}',
+    );
+  }
   final changes = <_Change>[
     ..._parseNameStatus(diff.stdout),
     for (final path in untracked.stdout.split('\x00'))
@@ -238,9 +260,15 @@ Future<ProveTestsReport> proveTestsCanFail(
   if (testFiles != null && testFiles.isNotEmpty) {
     selected = [];
     for (final f in testFiles) {
-      final abs = p.normalize(p.isAbsolute(f) ? f : p.join(root, f));
-      if (!File(abs).existsSync()) {
+      final given = p.normalize(p.isAbsolute(f) ? f : p.join(root, f));
+      if (!File(given).existsSync()) {
         throw ProveTestsException('Test file not found: $f');
+      }
+      final abs = _canonical(given, file: true);
+      if (!p.isWithin(repo, abs)) {
+        throw ProveTestsException(
+          'Test file $f is outside the repository at $repo.',
+        );
       }
       selected.add(relPosix(repo, abs));
     }
@@ -437,6 +465,18 @@ Future<ProveTestsReport> proveTestsCanFail(
     }
     await _deleteWithRetry(temp);
     await git(['worktree', 'prune'], cwd: repo);
+  }
+}
+
+/// Resolves links and alternate spellings of [path] to one canonical form.
+String _canonical(String path, {bool file = false}) {
+  try {
+    final resolved = file
+        ? File(path).resolveSymbolicLinksSync()
+        : Directory(path).resolveSymbolicLinksSync();
+    return p.normalize(resolved);
+  } on FileSystemException {
+    return p.normalize(path);
   }
 }
 
