@@ -26,6 +26,7 @@ export 'src/process_runner.dart'
     show CommandRunner, ProcessOutcome, runCommand, trimOutput;
 export 'src/prove_tests.dart'
     show FileResult, ProveTestsException, ProveTestsReport, proveTestsCanFail;
+export 'src/server.dart' show VerifyServer, packageVersion;
 export 'src/test_results.dart'
     show
         SuiteRun,
