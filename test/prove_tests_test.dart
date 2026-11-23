@@ -168,6 +168,52 @@ void main() {
     expect(report.checkCurrent, isFalse);
   });
 
+  test('handles a test in a nested pub workspace member', () async {
+    final repo = tempDir('dvm_ws_');
+    writeFiles(repo, {
+      '.gitignore': '.dart_tool/\n',
+      'pubspec.yaml': '''
+name: ws_root
+publish_to: none
+environment:
+  sdk: ^3.6.0
+workspace:
+  - pkgs/core
+''',
+      'pkgs/core/pubspec.yaml': '''
+name: core
+publish_to: none
+environment:
+  sdk: ^3.6.0
+resolution: workspace
+dev_dependencies:
+  test: any
+''',
+      'pkgs/core/lib/core.dart': 'int one() => 0;\n',
+    });
+    git(repo, ['init', '-q', '-b', 'main']);
+    git(repo, ['add', '.']);
+    git(repo, ['commit', '-q', '-m', 'base']);
+    writeFiles(repo, {
+      'pkgs/core/lib/core.dart': 'int one() => 1;\n',
+      'pkgs/core/test/one_test.dart': '''
+import 'package:core/core.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('one is one', () => expect(one(), 1));
+}
+''',
+    });
+
+    final report = await proveTestsCanFail(repo);
+    expect(verdicts(report), {
+      'pkgs/core/test/one_test.dart: one is one': Verdict.failsOnBase,
+    });
+    expect(report.files.single.packageDir, 'pkgs/core');
+    expect(report.files.single.runner, 'dart');
+  });
+
   test('with nothing changed, says so', () async {
     final repo = buildFixture();
     git(repo, ['add', '.']);
