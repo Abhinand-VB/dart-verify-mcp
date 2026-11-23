@@ -189,7 +189,7 @@ pure core (`FakeClock.advanceTo` accepting the current instant, plus a new
 including a bug in `startedAt`:
 
 ```
-prove_tests_can_fail vs HEAD (92cc7f0): 3 changed test(s) in 2 file(s) (11 unchanged test(s) not judged). 1 FAILS_ON_BASE, 1 PASSES_ON_BASE, 1 FAILS_ON_CURRENT.
+prove_tests_can_fail vs HEAD (4a5ba50): 3 changed test(s) in 2 file(s) (11 unchanged test(s) not judged). 1 FAILS_ON_BASE, 1 PASSES_ON_BASE, 1 FAILS_ON_CURRENT.
   FAILS_ON_CURRENT: packages/van_core/test/clock_start_test.dart:5: startedAt remembers the first instant
   FAILS_ON_CURRENT: packages/van_core/test/clock_test.dart:61: FakeClock advanceTo rejects the current instant
   PASSES_ON_BASE: packages/van_core/test/clock_test.dart:75: FakeClock advanceTo still moves to a later instant
@@ -200,7 +200,7 @@ unchanged test that the behaviour change broke. After fixing the getter and
 removing the obsolete test:
 
 ```
-prove_tests_can_fail vs HEAD (92cc7f0): 3 changed test(s) in 2 file(s) (10 unchanged test(s) not judged). 1 FAILS_ON_BASE, 1 PASSES_ON_BASE, 1 ERROR.
+prove_tests_can_fail vs HEAD (4a5ba50): 3 changed test(s) in 2 file(s) (10 unchanged test(s) not judged). 1 FAILS_ON_BASE, 1 PASSES_ON_BASE, 1 ERROR.
   PASSES_ON_BASE: packages/van_core/test/clock_test.dart:67: FakeClock advanceTo still moves to a later instant
 ```
 
@@ -396,7 +396,7 @@ run_gate: DONE. All 4 step(s) passed.
   passed    test (44.7s)
 ```
 
-(591 tests at Van commit `92cc7f0`.) If running on a device is part of
+(591 tests at Van commit `4a5ba50`.) If running on a device is part of
 done for your project, put that in the gate as a step, for example an
 `integration_test` run or a script that builds and installs the app.
 
