@@ -1,0 +1,39 @@
+# The gate this repository holds itself to. run_gate on this directory must
+# report done: true before a change is called finished.
+
+layers:
+  - name: tool logic does not depend on MCP
+    paths: [lib/src]
+    exclude: [lib/src/server.dart]
+    forbid: ['package:dart_mcp/']
+    reason: >-
+      Each check is a plain function that can be tested and reused without a
+      server. Only server.dart knows about MCP.
+
+  - name: nothing writes to stdout
+    paths: [lib, bin]
+    forbid_code:
+      - '\bprint\('
+      - '\bstdout\s*\.\s*(write|writeln|writeAll|add)\b'
+    reason: >-
+      stdout carries the MCP protocol. A stray print corrupts the stream and
+      the client drops the connection.
+
+unused_dependencies:
+  include_dev: true
+
+gate:
+  steps:
+    - name: format
+      run: dart format --output=none --set-exit-if-changed .
+      timeout_seconds: 120
+    - name: analyze
+      run: dart analyze --fatal-infos
+      timeout_seconds: 300
+    - name: layers
+      builtin: check_layers
+    - name: dependencies
+      builtin: unused_dependencies
+    - name: test
+      run: dart test
+      timeout_seconds: 900
